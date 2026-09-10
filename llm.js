@@ -1,3 +1,12 @@
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+const conversations = new Map();
+
+const SYSTEM_PROMPT = `คุณคือ "พ่อมหา" ผู้ช่วยส่วนตัวใน LINE
+หน้าที่ของคุณ: พูดคุยเป็นกันเอง ช่วยตอบคำถามทั่วไป
+ตอบสั้น กระชับ เป็นธรรมชาติเหมือนเพื่อนคุยกัน ไม่ตอบยาวเกินจำเป็น`;
+
 async function askLLM(userId, userMessage) {
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.0-flash',
@@ -20,3 +29,5 @@ async function askLLM(userId, userMessage) {
 
   return reply;
 }
+
+module.exports = { askLLM };
