@@ -8,10 +8,10 @@ const SYSTEM_PROMPT = `คุณคือ "พ่อมหา" ผู้ช่�
 ตอบสั้น กระชับ เป็นธรรมชาติเหมือนเพื่อนคุยกัน ไม่ตอบยาวเกินจำเป็น`;
 
 async function askLLM(userId, userMessage) {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash',
+const model = genAI.getGenerativeModel({
+    model: 'gemini-3.6-flash',
     systemInstruction: SYSTEM_PROMPT,
-  });
+});
 
   if (!conversations.has(userId)) conversations.set(userId, []);
   const history = conversations.get(userId);
