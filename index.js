@@ -3,6 +3,7 @@ const express = require('express');
 const line = require('@line/bot-sdk');
 const { askLLM } = require('./llm');
 const { createClient } = require('@supabase/supabase-js');
+const { getOAuthClient, getAuthUrl } = require('./google-calendar');
 
 const config = {
   channelSecret: process.env.CHANNEL_SECRET,
@@ -48,6 +49,22 @@ app.get('/check-reminders', async (req, res) => {
     await supabase.from('reminders').update({ sent: true }).eq('id', r.id);
   }
   res.send(`checked ${due.length} reminders`);
+});
+
+app.get('/connect-calendar', (req, res) => {
+  const userId = req.query.userId;
+  res.redirect(getAuthUrl(userId));
+});
+
+app.get('/oauth/callback', async (req, res) => {
+  const { code, state: userId } = req.query;
+  const oauth2Client = getOAuthClient();
+  const { tokens } = await oauth2Client.getToken(code);
+
+  const { error } = await supabase.from('users').upsert({ user_id: userId, google_refresh_token: tokens.refresh_token });
+  if (error) console.error('Supabase upsert error:', error);
+
+  res.send('เชื่อมต่อ Google Calendar สำเร็จแล้ว ปิดหน้านี้แล้วกลับไปคุยกับพ่อมหาได้เลย');
 });
 
 app.get('/', (req, res) => res.send('พ่อมหา bot ทำงานอยู่'));
