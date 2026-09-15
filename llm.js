@@ -4,6 +4,8 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
+const { createCalendarEvent } = require('./google-calendar');
+
 const conversations = new Map();
 
 const SYSTEM_PROMPT = `คุณคือ "พ่อมหา" ผู้ช่วยส่วนตัวใน LINE
@@ -11,18 +13,33 @@ const SYSTEM_PROMPT = `คุณคือ "พ่อมหา" ผู้ช่�
 ตอบสั้น กระชับ เป็นธรรมชาติเหมือนเพื่อนคุยกัน ไม่ตอบยาวเกินจำเป็น`;
 
 const tools = [{
-  functionDeclarations: [{
-    name: 'set_reminder',
-    description: 'ตั้งการแจ้งเตือนให้ผู้ใช้ เรียกเมื่อผู้ใช้ขอให้เตือนเรื่องอะไรบางอย่างในเวลาที่กำหนด',
-    parameters: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: 'หัวข้อเรื่องที่จะเตือน' },
-        remind_at: { type: 'string', description: 'วันเวลาที่จะเตือน รูปแบบ ISO เช่น 2026-09-11T18:00:00+07:00' },
+  functionDeclarations: [
+    {
+      name: 'set_reminder',
+      description: 'ตั้งการแจ้งเตือนให้ผู้ใช้ เรียกเมื่อผู้ใช้ขอให้เตือนเรื่องอะไรบางอย่างในเวลาที่กำหนด',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'หัวข้อเรื่องที่จะเตือน' },
+          remind_at: { type: 'string', description: 'วันเวลาที่จะเตือน รูปแบบ ISO เช่น 2026-09-11T18:00:00+07:00' },
+        },
+        required: ['title', 'remind_at'],
       },
-      required: ['title', 'remind_at'],
     },
-  }],
+    {
+      name: 'create_calendar_event',
+      description: 'สร้างนัดหมายลงใน Google Calendar ของผู้ใช้ เรียกเมื่อผู้ใช้ขอให้นัดหมาย/จดตารางงาน/สร้างอีเวนต์',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'ชื่อของนัดหมาย' },
+          start_time: { type: 'string', description: 'เวลาเริ่ม รูปแบบ ISO เช่น 2026-09-12T14:00:00+07:00' },
+          end_time: { type: 'string', description: 'เวลาสิ้นสุด รูปแบบ ISO' },
+        },
+        required: ['title', 'start_time', 'end_time'],
+      },
+    },
+  ],
 }];
 
 async function saveReminder(userId, title, remindAt) {
@@ -50,6 +67,14 @@ async function askLLM(userId, userMessage) {
   if (call && call.name === 'set_reminder') {
     await saveReminder(userId, call.args.title, call.args.remind_at);
     reply = `จำให้แล้วนะ จะเตือนเรื่อง "${call.args.title}" ให้`;
+  } else if (call && call.name === 'create_calendar_event') {
+    const { data: userRow } = await supabase.from('users').select('google_refresh_token').eq('user_id', userId).single();
+    if (!userRow || !userRow.google_refresh_token) {
+      reply = `ยังไม่ได้เชื่อมต่อ Google Calendar เลยนะ เชื่อมก่อนได้ที่ลิงก์นี้: https://pormaha-bot.onrender.com/connect-calendar?userId=${userId}`;
+    } else {
+      const link = await createCalendarEvent(userRow.google_refresh_token, call.args.title, call.args.start_time, call.args.end_time);
+      reply = `นัดหมายเรียบร้อยแล้วนะ: ${link}`;
+    }
   } else {
     reply = result.response.text();
   }

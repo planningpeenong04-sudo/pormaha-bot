@@ -12,9 +12,26 @@ function getAuthUrl(userId) {
   const oauth2Client = getOAuthClient();
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
+    prompt: 'consent',
     scope: ['https://www.googleapis.com/auth/calendar.events'],
     state: userId, // ใช้รู้ว่า token นี้เป็นของ user คนไหนตอน callback กลับมา
   });
 }
 
-module.exports = { getOAuthClient, getAuthUrl };
+async function createCalendarEvent(refreshToken, title, startTime, endTime) {
+  const oauth2Client = getOAuthClient();
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
+
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+  const event = await calendar.events.insert({
+    calendarId: 'primary',
+    requestBody: {
+      summary: title,
+      start: { dateTime: startTime, timeZone: 'Asia/Bangkok' },
+      end: { dateTime: endTime, timeZone: 'Asia/Bangkok' },
+    },
+  });
+  return event.data.htmlLink;
+}
+
+module.exports = { getOAuthClient, getAuthUrl, createCalendarEvent };
