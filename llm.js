@@ -47,49 +47,54 @@ async function saveReminder(userId, title, remindAt) {
 }
 
 async function askLLM(userId, userMessage) {
-  const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+  try {
+    const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
 
-  const { data: userRow } = await supabase.from('users').select('nickname, tone').eq('user_id', userId).single();
-  const personalizedPrompt = SYSTEM_PROMPT
-    + (userRow?.nickname ? `\nเรียกผู้ใช้ว่า "${userRow.nickname}"` : '')
-    + (userRow?.tone ? `\nโทนการพูด: ${userRow.tone}` : '')
-    + `\nเวลาปัจจุบันคือ ${now} (เขตเวลาไทย)`;
+    const { data: userRow } = await supabase.from('users').select('nickname, tone').eq('user_id', userId).single();
+    const personalizedPrompt = SYSTEM_PROMPT
+      + (userRow?.nickname ? `\nเรียกผู้ใช้ว่า "${userRow.nickname}"` : '')
+      + (userRow?.tone ? `\nโทนการพูด: ${userRow.tone}` : '')
+      + `\nเวลาปัจจุบันคือ ${now} (เขตเวลาไทย)`;
 
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-3.6-flash',
-    tools,
-    systemInstruction: personalizedPrompt,
-  });
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3.1-flash-lite',
+      tools,
+      systemInstruction: personalizedPrompt,
+    });
 
-  if (!conversations.has(userId)) conversations.set(userId, []);
-  const history = conversations.get(userId);
+    if (!conversations.has(userId)) conversations.set(userId, []);
+    const history = conversations.get(userId);
 
-  const chat = model.startChat({ history });
+    const chat = model.startChat({ history });
 
-  const result = await chat.sendMessage(userMessage);
-  const call = result.response.functionCalls()?.[0];
+    const result = await chat.sendMessage(userMessage);
+    const call = result.response.functionCalls()?.[0];
 
-  let reply;
-  if (call && call.name === 'set_reminder') {
-    await saveReminder(userId, call.args.title, call.args.remind_at);
-    reply = `จำให้แล้วนะ จะเตือนเรื่อง "${call.args.title}" ให้`;
-  } else if (call && call.name === 'create_calendar_event') {
-    const { data: userRow2 } = await supabase.from('users').select('google_refresh_token').eq('user_id', userId).single();
-    if (!userRow2 || !userRow2.google_refresh_token) {
-      reply = `ยังไม่ได้เชื่อมต่อ Google Calendar เลยนะ เชื่อมก่อนได้ที่ลิงก์นี้: https://pormaha-bot.onrender.com/connect-calendar?userId=${userId}`;
+    let reply;
+    if (call && call.name === 'set_reminder') {
+      await saveReminder(userId, call.args.title, call.args.remind_at);
+      reply = `จำให้แล้วนะ จะเตือนเรื่อง "${call.args.title}" ให้`;
+    } else if (call && call.name === 'create_calendar_event') {
+      const { data: userRow2 } = await supabase.from('users').select('google_refresh_token').eq('user_id', userId).single();
+      if (!userRow2 || !userRow2.google_refresh_token) {
+        reply = `ยังไม่ได้เชื่อมต่อ Google Calendar เลยนะ เชื่อมก่อนได้ที่ลิงก์นี้: https://pormaha-bot.onrender.com/connect-calendar?userId=${userId}`;
+      } else {
+        const link = await createCalendarEvent(userRow2.google_refresh_token, call.args.title, call.args.start_time, call.args.end_time);
+        reply = `นัดหมายเรียบร้อยแล้วนะ: ${link}`;
+      }
     } else {
-      const link = await createCalendarEvent(userRow2.google_refresh_token, call.args.title, call.args.start_time, call.args.end_time);
-      reply = `นัดหมายเรียบร้อยแล้วนะ: ${link}`;
+      reply = result.response.text();
     }
-  } else {
-    reply = result.response.text();
+
+    history.push({ role: 'user', parts: [{ text: userMessage }] });
+    history.push({ role: 'model', parts: [{ text: reply }] });
+    if (history.length > 20) history.splice(0, history.length - 20);
+
+    return reply;
+  } catch (err) {
+    console.error('askLLM error:', err);
+    return 'ขอโทษนะ ตอนนี้พ่อมหาตอบไม่ได้ ลองพิมพ์ใหม่อีกครั้งนะ';
   }
-
-  history.push({ role: 'user', parts: [{ text: userMessage }] });
-  history.push({ role: 'model', parts: [{ text: reply }] });
-  if (history.length > 20) history.splice(0, history.length - 20);
-
-  return reply;
 }
 
 module.exports = { askLLM };
