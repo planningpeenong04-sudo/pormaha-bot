@@ -4,6 +4,7 @@ const line = require('@line/bot-sdk');
 const { askLLM } = require('./llm');
 const { createClient } = require('@supabase/supabase-js');
 const { getOAuthClient, getAuthUrl } = require('./google-calendar');
+const cors = require('cors');
 
 const config = {
   channelSecret: process.env.CHANNEL_SECRET,
@@ -18,6 +19,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 
 app.post('/webhook', line.middleware(config), async (req, res) => {
   res.status(200).end(); // ตอบ LINE ทันทีก่อนประมวลผล
