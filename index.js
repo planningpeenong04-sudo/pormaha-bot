@@ -17,6 +17,7 @@ const client = new line.messagingApi.MessagingApiClient({
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const app = express();
+app.use(express.json());
 
 app.post('/webhook', line.middleware(config), async (req, res) => {
   res.status(200).end(); // ตอบ LINE ทันทีก่อนประมวลผล
@@ -65,6 +66,13 @@ app.get('/oauth/callback', async (req, res) => {
   if (error) console.error('Supabase upsert error:', error);
 
   res.send('เชื่อมต่อ Google Calendar สำเร็จแล้ว ปิดหน้านี้แล้วกลับไปคุยกับพ่อมหาได้เลย');
+});
+
+app.post('/update-settings', async (req, res) => {
+  const { userId, nickname, tone } = req.body;
+  const { error } = await supabase.from('users').upsert({ user_id: userId, nickname, tone });
+  if (error) console.error('Supabase upsert error:', error);
+  res.json({ ok: true });
 });
 
 app.get('/', (req, res) => res.send('พ่อมหา bot ทำงานอยู่'));
