@@ -32,6 +32,29 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
         replyToken: event.replyToken,
         messages: [{ type: 'text', text: reply }],
       });
+    } else if (event.type === 'message' && event.message.type === 'image') {
+      const userId = event.source.userId;
+
+      try {
+        const stream = await client.getMessageContent(event.message.id);
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        const buffer = Buffer.concat(chunks);
+
+        const fileName = `${userId}/${event.message.id}.jpg`;
+        await supabase.storage.from('files').upload(fileName, buffer, { contentType: 'image/jpeg' });
+
+        await client.replyMessage({
+          replyToken: event.replyToken,
+          messages: [{ type: 'text', text: 'เก็บรูปให้แล้วนะ 📸' }],
+        });
+      } catch (err) {
+        console.error('image upload error:', err);
+        await client.replyMessage({
+          replyToken: event.replyToken,
+          messages: [{ type: 'text', text: 'ขอโทษนะ เก็บรูปไม่สำเร็จ ลองส่งใหม่อีกครั้งนะ' }],
+        });
+      }
     }
   }
 });
