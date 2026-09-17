@@ -15,6 +15,10 @@ const client = new line.messagingApi.MessagingApiClient({
   channelAccessToken: config.channelAccessToken,
 });
 
+const blobClient = new line.messagingApi.MessagingApiBlobClient({
+  channelAccessToken: config.channelAccessToken,
+});
+
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const app = express();
@@ -36,7 +40,7 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
       const userId = event.source.userId;
 
       try {
-        const stream = await client.getMessageContent(event.message.id);
+        const stream = await blobClient.getMessageContent(event.message.id);
         const chunks = [];
         for await (const chunk of stream) chunks.push(chunk);
         const buffer = Buffer.concat(chunks);
