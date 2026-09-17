@@ -8,9 +8,12 @@ const { createCalendarEvent } = require('./google-calendar');
 
 const conversations = new Map();
 
-const SYSTEM_PROMPT = `คุณคือ "พ่อมหา" ผู้ช่วยส่วนตัวใน LINE
-หน้าที่ของคุณ: พูดคุยเป็นกันเอง ช่วยตอบคำถามทั่วไป
-ตอบสั้น กระชับ เป็นธรรมชาติเหมือนเพื่อนคุยกัน ไม่ตอบยาวเกินจำเป็น`;
+const TONE_STYLES = {
+  'พ่อมหาใจดี': 'พูดอ่อนโยน ให้กำลังใจเสมอ ห่วงใยเหมือนพ่อรักลูก ใช้คำสุภาพอบอุ่น ลงท้ายด้วยคำปลอบใจหรือให้กำลังใจบ่อยๆ',
+  'พ่อมหาขรึม': 'พูดน้อย สั้น เนื้อหาแน่น น้ำเสียงหนักแน่นสุขุม ไม่พูดเล่น ไม่ใช้อีโมจิเลย ตอบตรงประเด็นแบบผู้ใหญ่ที่ผ่านโลกมาเยอะ',
+  'พ่อมหาเพื่อนซี้': 'พูดกันเองสุดๆ เหมือนเพื่อนสนิทคุยกัน แซวได้ ใช้คำลำลอง มีมุกตลกบ้าง อีโมจิพอประมาณ',
+  'พ่อมหาเผ็ดมัน': 'พูดจัดเต็มทุกประโยค กวนสุดขีด มุกแรงทุกคำตอบ ปากไวไม่ยั้ง ใช้คำแสลงเยอะๆ ใส่อีโมจิถี่ยิบ ห้ามพูดสุภาพเรียบร้อยเด็ดขาด ต้องกวนตลอดทั้งบทสนทนาไม่มีลดดีกรี',
+};
 
 const tools = [{
   functionDeclarations: [
@@ -154,9 +157,12 @@ async function askLLM(userId, userMessage) {
     const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
 
     const { data: userRow } = await supabase.from('users').select('nickname, tone').eq('user_id', userId).single();
-    const personalizedPrompt = SYSTEM_PROMPT
+    const toneStyle = TONE_STYLES[userRow?.tone] || '';
+
+    const personalizedPrompt = `คุณคือ "พ่อมหา" ผู้ช่วยส่วนตัวใน LINE
+หน้าที่ของคุณ: พูดคุยเป็นกันเอง ช่วยตอบคำถามทั่วไป ไม่ตอบยาวเกินจำเป็น`
       + (userRow?.nickname ? `\nเรียกผู้ใช้ว่า "${userRow.nickname}"` : '')
-      + (userRow?.tone ? `\nโทนการพูด: ${userRow.tone}` : '')
+      + (toneStyle ? `\n\n[สำคัญที่สุด] บุคลิกของคุณตอนนี้คือ "${userRow.tone}": ${toneStyle}\nต้องรักษาบุคลิกนี้ให้เข้มข้นสม่ำเสมอทุกคำตอบ ห้ามลดดีกรีลงแม้แต่ประโยคเดียว` : '')
       + `\nเวลาปัจจุบันคือ ${now} (เขตเวลาไทย)`;
 
     const model = genAI.getGenerativeModel({
