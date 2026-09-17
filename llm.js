@@ -44,9 +44,7 @@ const tools = [{
       description: 'เพิ่มรายการสิ่งที่ต้องทำ เรียกเมื่อผู้ใช้บอกให้จดงาน/จดสิ่งที่ต้องทำไว้ (ไม่ใช่การเตือนตามเวลา)',
       parameters: {
         type: 'object',
-        properties: {
-          task: { type: 'string', description: 'สิ่งที่ต้องทำ' },
-        },
+        properties: { task: { type: 'string', description: 'สิ่งที่ต้องทำ' } },
         required: ['task'],
       },
     },
@@ -60,10 +58,40 @@ const tools = [{
       description: 'ทำเครื่องหมายว่างานเสร็จแล้ว เรียกเมื่อผู้ใช้บอกว่าทำสิ่งนั้นเสร็จแล้ว',
       parameters: {
         type: 'object',
-        properties: {
-          task: { type: 'string', description: 'ชื่องานที่ทำเสร็จแล้ว (เอามาจากที่ผู้ใช้พูด)' },
-        },
+        properties: { task: { type: 'string', description: 'ชื่องานที่ทำเสร็จแล้ว (เอามาจากที่ผู้ใช้พูด)' } },
         required: ['task'],
+      },
+    },
+    {
+      name: 'label_last_image',
+      description: 'ตั้งชื่อ/ป้ายกำกับให้รูปล่าสุดที่ผู้ใช้เพิ่งส่งมา เรียกเมื่อผู้ใช้บอกให้ตั้งชื่อรูป',
+      parameters: {
+        type: 'object',
+        properties: { label: { type: 'string', description: 'ชื่อที่จะตั้งให้รูป' } },
+        required: ['label'],
+      },
+    },
+    {
+      name: 'list_images',
+      description: 'แสดงรายการรูปที่เคยเก็บไว้ทั้งหมด เรียกเมื่อผู้ใช้ถามว่ามีรูปอะไรเก็บไว้บ้าง',
+      parameters: { type: 'object', properties: {} },
+    },
+    {
+      name: 'get_image',
+      description: 'ดึงลิงก์รูปที่เคยเก็บไว้ตามชื่อที่ตั้ง เรียกเมื่อผู้ใช้ขอดูรูปที่เคยตั้งชื่อไว้',
+      parameters: {
+        type: 'object',
+        properties: { label: { type: 'string', description: 'ชื่อรูปที่ต้องการดู' } },
+        required: ['label'],
+      },
+    },
+    {
+      name: 'delete_image',
+      description: 'ลบรูปที่เคยเก็บไว้ เรียกเมื่อผู้ใช้ขอให้ลบรูป',
+      parameters: {
+        type: 'object',
+        properties: { label: { type: 'string', description: 'ชื่อรูปที่ต้องการลบ' } },
+        required: ['label'],
       },
     },
   ],
@@ -90,6 +118,35 @@ async function completeTodo(userId, task) {
     return match.task;
   }
   return null;
+}
+
+async function labelLastImage(userId, label) {
+  const { data } = await supabase.from('images').select('id').eq('user_id', userId).order('created_at', { ascending: false }).limit(1);
+  if (!data || data.length === 0) return false;
+  await supabase.from('images').update({ label }).eq('id', data[0].id);
+  return true;
+}
+
+async function listImages(userId) {
+  const { data } = await supabase.from('images').select('label, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10);
+  return data || [];
+}
+
+async function getImageUrl(userId, label) {
+  const { data } = await supabase.from('images').select('file_path, label').eq('user_id', userId);
+  const match = data?.find(r => r.label && (r.label.includes(label) || label.includes(r.label)));
+  if (!match) return null;
+  const { data: urlData } = supabase.storage.from('files').getPublicUrl(match.file_path);
+  return urlData.publicUrl;
+}
+
+async function deleteImage(userId, label) {
+  const { data } = await supabase.from('images').select('id, file_path, label').eq('user_id', userId);
+  const match = data?.find(r => r.label && (r.label.includes(label) || label.includes(r.label)));
+  if (!match) return null;
+  await supabase.storage.from('files').remove([match.file_path]);
+  await supabase.from('images').delete().eq('id', match.id);
+  return match.label;
 }
 
 async function askLLM(userId, userMessage) {
@@ -139,6 +196,20 @@ async function askLLM(userId, userMessage) {
     } else if (call && call.name === 'complete_todo') {
       const done = await completeTodo(userId, call.args.task);
       reply = done ? `เก่งมาก! "${done}" เสร็จแล้วนะ` : `หางานนี้ไม่เจอในลิสต์เลย ลองพูดชื่องานให้ตรงกว่านี้ดูนะ`;
+    } else if (call && call.name === 'label_last_image') {
+      const ok = await labelLastImage(userId, call.args.label);
+      reply = ok ? `ตั้งชื่อรูปว่า "${call.args.label}" ให้แล้วนะ` : `ยังไม่มีรูปที่เก็บไว้เลย ส่งรูปมาก่อนนะ`;
+    } else if (call && call.name === 'list_images') {
+      const images = await listImages(userId);
+      reply = images.length
+        ? `รูปที่เก็บไว้มี:\n${images.map((im, i) => `${i + 1}. ${im.label || '(ยังไม่ได้ตั้งชื่อ)'}`).join('\n')}`
+        : `ยังไม่มีรูปที่เก็บไว้เลยนะ`;
+    } else if (call && call.name === 'get_image') {
+      const url = await getImageUrl(userId, call.args.label);
+      reply = url || `หารูปชื่อนี้ไม่เจอเลยนะ`;
+    } else if (call && call.name === 'delete_image') {
+      const deleted = await deleteImage(userId, call.args.label);
+      reply = deleted ? `ลบรูป "${deleted}" ให้แล้วนะ` : `หารูปชื่อนี้ไม่เจอเลยนะ`;
     } else {
       reply = result.response.text();
     }
