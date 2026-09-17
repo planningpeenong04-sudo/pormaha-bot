@@ -39,11 +39,57 @@ const tools = [{
         required: ['title', 'start_time', 'end_time'],
       },
     },
+    {
+      name: 'add_todo',
+      description: 'เพิ่มรายการสิ่งที่ต้องทำ เรียกเมื่อผู้ใช้บอกให้จดงาน/จดสิ่งที่ต้องทำไว้ (ไม่ใช่การเตือนตามเวลา)',
+      parameters: {
+        type: 'object',
+        properties: {
+          task: { type: 'string', description: 'สิ่งที่ต้องทำ' },
+        },
+        required: ['task'],
+      },
+    },
+    {
+      name: 'list_todos',
+      description: 'แสดงรายการสิ่งที่ต้องทำทั้งหมดที่ยังไม่เสร็จ เรียกเมื่อผู้ใช้ถามว่ามีอะไรต้องทำบ้าง',
+      parameters: { type: 'object', properties: {} },
+    },
+    {
+      name: 'complete_todo',
+      description: 'ทำเครื่องหมายว่างานเสร็จแล้ว เรียกเมื่อผู้ใช้บอกว่าทำสิ่งนั้นเสร็จแล้ว',
+      parameters: {
+        type: 'object',
+        properties: {
+          task: { type: 'string', description: 'ชื่องานที่ทำเสร็จแล้ว (เอามาจากที่ผู้ใช้พูด)' },
+        },
+        required: ['task'],
+      },
+    },
   ],
 }];
 
 async function saveReminder(userId, title, remindAt) {
   await supabase.from('reminders').insert({ user_id: userId, title, remind_at: remindAt });
+}
+
+async function addTodo(userId, task) {
+  await supabase.from('todos').insert({ user_id: userId, task });
+}
+
+async function listTodos(userId) {
+  const { data } = await supabase.from('todos').select('task').eq('user_id', userId).eq('done', false);
+  return data || [];
+}
+
+async function completeTodo(userId, task) {
+  const { data } = await supabase.from('todos').select('id, task').eq('user_id', userId).eq('done', false);
+  const match = data?.find(t => t.task.includes(task) || task.includes(t.task));
+  if (match) {
+    await supabase.from('todos').update({ done: true }).eq('id', match.id);
+    return match.task;
+  }
+  return null;
 }
 
 async function askLLM(userId, userMessage) {
@@ -82,6 +128,17 @@ async function askLLM(userId, userMessage) {
         const link = await createCalendarEvent(userRow2.google_refresh_token, call.args.title, call.args.start_time, call.args.end_time);
         reply = `นัดหมายเรียบร้อยแล้วนะ: ${link}`;
       }
+    } else if (call && call.name === 'add_todo') {
+      await addTodo(userId, call.args.task);
+      reply = `จดไว้แล้วนะ: "${call.args.task}"`;
+    } else if (call && call.name === 'list_todos') {
+      const todos = await listTodos(userId);
+      reply = todos.length
+        ? `สิ่งที่ต้องทำตอนนี้มี:\n${todos.map((t, i) => `${i + 1}. ${t.task}`).join('\n')}`
+        : `ตอนนี้ไม่มีสิ่งที่ต้องทำค้างอยู่เลยนะ`;
+    } else if (call && call.name === 'complete_todo') {
+      const done = await completeTodo(userId, call.args.task);
+      reply = done ? `เก่งมาก! "${done}" เสร็จแล้วนะ` : `หางานนี้ไม่เจอในลิสต์เลย ลองพูดชื่องานให้ตรงกว่านี้ดูนะ`;
     } else {
       reply = result.response.text();
     }

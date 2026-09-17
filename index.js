@@ -71,8 +71,18 @@ app.get('/oauth/callback', async (req, res) => {
 
 app.post('/update-settings', express.json(), async (req, res) => {
   const { userId, nickname, tone } = req.body;
+
+  if (!userId) {
+    console.error('update-settings called without userId');
+    return res.status(400).json({ ok: false, error: 'missing userId' });
+  }
+
   const { error } = await supabase.from('users').upsert({ user_id: userId, nickname, tone });
-  if (error) console.error('Supabase upsert error:', error);
+  if (error) {
+    console.error('Supabase upsert error:', error);
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+
   res.json({ ok: true });
 });
 
