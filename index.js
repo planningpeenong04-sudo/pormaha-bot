@@ -46,14 +46,21 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
         const buffer = Buffer.concat(chunks);
 
         const fileName = `${userId}/${event.message.id}.jpg`;
-        await supabase.storage.from('files').upload(fileName, buffer, { contentType: 'image/jpeg' });
+
+        const uploadResult = await supabase.storage.from('files').upload(fileName, buffer, { contentType: 'image/jpeg' });
+        console.log('UPLOAD RESULT:', JSON.stringify(uploadResult));
+        if (uploadResult.error) throw uploadResult.error;
+
+        const insertResult = await supabase.from('images').insert({ user_id: userId, file_path: fileName });
+        console.log('INSERT RESULT:', JSON.stringify(insertResult));
+        if (insertResult.error) throw insertResult.error;
 
         await client.replyMessage({
           replyToken: event.replyToken,
-          messages: [{ type: 'text', text: 'เก็บรูปให้แล้วนะ 📸' }],
+          messages: [{ type: 'text', text: 'เก็บรูปให้แล้วนะ 📸 อยากตั้งชื่อไหม พิมพ์ "ตั้งชื่อรูปล่าสุดว่า ..." ได้เลย' }],
         });
       } catch (err) {
-        console.error('image upload error:', err);
+        console.error('IMAGE UPLOAD ERROR:', err);
         await client.replyMessage({
           replyToken: event.replyToken,
           messages: [{ type: 'text', text: 'ขอโทษนะ เก็บรูปไม่สำเร็จ ลองส่งใหม่อีกครั้งนะ' }],
