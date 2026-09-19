@@ -31,7 +31,19 @@ async function createCalendarEvent(refreshToken, title, startTime, endTime) {
       end: { dateTime: endTime, timeZone: 'Asia/Bangkok' },
     },
   });
-  return event.data.htmlLink;
+  // คืนทั้งลิงก์และ event ID (ต้องเก็บ ID ไว้ถึงจะลบทีหลังได้)
+  return { link: event.data.htmlLink, eventId: event.data.id };
 }
 
-module.exports = { getOAuthClient, getAuthUrl, createCalendarEvent };
+async function deleteCalendarEvent(refreshToken, eventId) {
+  const oauth2Client = getOAuthClient();
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
+
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+  await calendar.events.delete({
+    calendarId: 'primary',
+    eventId: eventId,
+  });
+}
+
+module.exports = { getOAuthClient, getAuthUrl, createCalendarEvent, deleteCalendarEvent };
