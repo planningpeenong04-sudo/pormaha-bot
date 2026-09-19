@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const line = require('@line/bot-sdk');
-const { askLLM } = require('./llm');
+const { askLLM, generateProactiveMessage } = require('./llm');
 const { createClient } = require('@supabase/supabase-js');
 const { getOAuthClient, getAuthUrl } = require('./google-calendar');
 const cors = require('cors');
@@ -55,6 +55,10 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
   res.status(200).end(); // ตอบ LINE ทันทีก่อนประมวลผล
 
   for (const event of req.body.events) {
+    if (event.source && event.source.userId) {
+      await supabase.from('users').upsert({ user_id: event.source.userId, last_active_at: new Date().toISOString() });
+    }
+
     if (event.type === 'message' && event.message.type === 'text') {
       const userId = event.source.userId;
       const reply = await askLLM(userId, event.message.text);
@@ -163,6 +167,30 @@ app.get('/daily-greeting', async (req, res) => {
   }
 
   res.send(`sent daily greeting to ${sentCount} users`);
+});
+
+app.get('/proactive-checkin', async (req, res) => {
+  const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+
+  const { data: idleUsers } = await supabase
+    .from('users')
+    .select('user_id')
+    .lt('last_active_at', sixHoursAgo)
+    .or(`last_checkin_at.is.null,last_checkin_at.lt.${sixHoursAgo}`);
+
+  let sentCount = 0;
+  for (const u of idleUsers || []) {
+    try {
+      const text = await generateProactiveMessage(u.user_id);
+      await client.pushMessage({ to: u.user_id, messages: [{ type: 'text', text }] });
+      await supabase.from('users').update({ last_checkin_at: new Date().toISOString() }).eq('user_id', u.user_id);
+      sentCount++;
+    } catch (err) {
+      console.error('proactive-checkin error for', u.user_id, err);
+    }
+  }
+
+  res.send(`sent proactive check-in to ${sentCount} users`);
 });
 
 app.get('/connect-calendar', (req, res) => {

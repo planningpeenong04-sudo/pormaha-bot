@@ -8,6 +8,7 @@ const { createCalendarEvent, deleteCalendarEvent } = require('./google-calendar'
 
 const conversations = new Map();
 const pendingConfirmations = new Map(); // userId -> { type: 'delete_all_todos' | 'delete_all_files' | 'delete_all_reminders' }
+const pendingRiddles = new Map(); // userId -> { question, answer }
 
 const TONE_STYLES = {
   'พ่อมหาใจดี': `พูดอ่อนโยนสุดๆ ห่วงใยแบบพ่อรักลูกจริงจัง ใช้คำสุภาพอบอุ่นทุกประโยค ถามไถ่ความเป็นอยู่บ่อยๆ ให้กำลังใจไม่ขาด ไม่พูดแรงหรือประชดเด็ดขาด ฟังดูอบอุ่นเหมือนมีคนคอยเป็นห่วงอยู่เสมอ
@@ -56,8 +57,25 @@ const BASE_INSTRUCTIONS = `คุณคือ "พ่อมหา" ผู้ช�
 กฎสำคัญเรื่องการใช้เครื่องมือ (tools):
 - เมื่อผู้ใช้ขอให้จดสิ่งที่ต้องทำหลายอย่างพร้อมกัน (เช่นพิมพ์มาหลายบรรทัด) ให้เรียก add_todos ครั้งเดียว โดยใส่ทุกรายการไว้ใน items array เดียวกันให้ครบ ห้ามเรียกทีละรายการ
 - เมื่อผู้ใช้ขอจดสิ่งที่ต้องทำแต่ไม่ได้บอกกำหนดส่ง ให้ถามกำหนดส่งของแต่ละงานก่อนเสมอ ก่อนจะเรียก add_todos ยกเว้นผู้ใช้บอกชัดเจนว่าไม่มีกำหนด
+- เมื่อระบุวันเวลาให้ tools ใดๆ (remind_at, start_time, end_time, due_date) ต้องใส่ timezone +07:00 ต่อท้ายเสมอ เช่น 2026-09-20T12:00:00+07:00 ห้ามละไว้เด็ดขาด
 - เมื่อผู้ใช้จะลบ/ทำเครื่องหมายเสร็จหลายรายการพร้อมกัน ให้ใส่ทุกรายการไว้ใน items array เดียวกัน แต่ละรายการจะเป็นชื่อเดิมหรือเลขลำดับที่เคยแสดงในรายการล่าสุดก็ได้
 - ถ้าผู้ใช้บอกให้ลบ "ทั้งหมด" ให้เรียกฟังก์ชัน delete_all_* ได้เลย ระบบจะถามยืนยันกับผู้ใช้เองอัตโนมัติ ไม่ต้องถามซ้ำเอง`;
+
+// คลังคำถาม/ปริศนากวนๆ สำหรับทักทายเชิงรุกตอนเงียบไปนาน
+const RIDDLES = [
+  { question: 'วันนี้วันศุกร์ เอากระปุกใส่กระเป๋า พรุ่งนี้วันเสาร์ เอากระเป๋าไปใส่อะไร?', answer: 'เป็นมุกเล่นคำแบบไม่มีคำตอบตายตัว ("กระเป๋า" ผสมมั่วๆ) ตอบรับสนุกๆ ไปกับคำตอบของผู้ใช้ ชมว่ากวนดีหรือแซวกลับก็ได้' },
+  { question: 'ถ้าให้เลือกได้ระหว่าง มีเงินเยอะแต่ไม่มีเวลาใช้ กับ มีเวลาเยอะแต่ไม่มีเงินใช้ จะเลือกอะไร?', answer: 'ไม่มีคำตอบตายตัว ให้แซวหรือชวนคุยต่อตามที่ผู้ใช้เลือก' },
+  { question: 'ทายซิ อะไรเอ่ย ยิ่งเอาออกยิ่งใหญ่ขึ้น?', answer: 'หลุม (หรือคำตอบใกล้เคียงที่มีเหตุผล) ถ้าทายถูกให้ชมเก่ง ถ้าทายไม่ตรงให้เฉลยแบบกวนๆ' },
+  { question: 'ถ้าเลือกได้ อยากย้อนกลับไปแก้อดีต หรืออยากรู้อนาคตล่วงหน้า?', answer: 'ไม่มีคำตอบตายตัว ให้คุยต่อสนุกๆ ตามที่ผู้ใช้ตอบ' },
+  { question: 'เดากันเล่นๆ ทายซิว่าตอนนี้พ่อมหากำลังนึกถึงเลข 1-10 เลขอะไร?', answer: 'สุ่มเลข 1-10 เอง ถ้าทายถูกให้ตื่นเต้นชม ถ้าไม่ถูกให้เฉลยแบบกวนๆ' },
+  { question: 'ถามจริงดิ ระหว่างกาแฟ กับ ชา ชอบอะไรมากกว่ากัน แล้วทำไม?', answer: 'ไม่มีคำตอบตายตัว ชวนคุยต่อแบบเพื่อนสนิท' },
+  { question: 'ปริศนา: มีปีกแต่บินไม่ได้ มีตาแต่มองไม่เห็น คืออะไร?', answer: 'ไก่ (มีปีกบินไม่ได้) หรือ พัดลม / มันฝรั่ง (มีตา) แล้วแต่ผู้ใช้ตอบมาแนวไหนก็รับไปทางนั้นแบบกวนๆ' },
+  { question: 'สมมุติมีเงินก้อนหนึ่งอยู่ดีๆ จะเอาไปทำอะไรก่อนเลย?', answer: 'ไม่มีคำตอบตายตัว ชวนคุยต่อ' },
+];
+
+function pickRandomRiddle() {
+  return RIDDLES[Math.floor(Math.random() * RIDDLES.length)];
+}
 
 const tools = [{
   functionDeclarations: [
@@ -68,7 +86,7 @@ const tools = [{
         type: 'object',
         properties: {
           title: { type: 'string', description: 'หัวข้อเรื่องที่จะเตือน' },
-          remind_at: { type: 'string', description: 'วันเวลาที่จะเตือนครั้งแรก รูปแบบ ISO เช่น 2026-09-11T18:00:00+07:00' },
+          remind_at: { type: 'string', description: 'วันเวลาที่จะเตือนครั้งแรก รูปแบบ ISO พร้อม timezone +07:00 เสมอ เช่น 2026-09-11T18:00:00+07:00' },
           recurrence: { type: 'string', description: 'ถ้าผู้ใช้ต้องการให้เตือนซ้ำ ใส่เป็น daily, weekly หรือ monthly ถ้าเตือนครั้งเดียวไม่ต้องใส่ฟิลด์นี้' },
         },
         required: ['title', 'remind_at'],
@@ -106,8 +124,8 @@ const tools = [{
         type: 'object',
         properties: {
           title: { type: 'string', description: 'ชื่อของนัดหมาย' },
-          start_time: { type: 'string', description: 'เวลาเริ่ม รูปแบบ ISO เช่น 2026-09-12T14:00:00+07:00' },
-          end_time: { type: 'string', description: 'เวลาสิ้นสุด รูปแบบ ISO' },
+          start_time: { type: 'string', description: 'เวลาเริ่ม รูปแบบ ISO พร้อม timezone +07:00 เสมอ เช่น 2026-09-12T14:00:00+07:00' },
+          end_time: { type: 'string', description: 'เวลาสิ้นสุด รูปแบบ ISO พร้อม timezone +07:00 เสมอ' },
         },
         required: ['title', 'start_time', 'end_time'],
       },
@@ -144,7 +162,7 @@ const tools = [{
               type: 'object',
               properties: {
                 task: { type: 'string', description: 'สิ่งที่ต้องทำ' },
-                due_date: { type: 'string', description: 'กำหนดส่ง รูปแบบ ISO ถ้าผู้ใช้ไม่ได้ระบุให้เว้นว่างไว้' },
+                due_date: { type: 'string', description: 'กำหนดส่ง รูปแบบ ISO พร้อม timezone +07:00 ถ้าผู้ใช้ไม่ได้ระบุให้เว้นว่างไว้' },
               },
               required: ['task'],
             },
@@ -251,6 +269,13 @@ function formatDateTH(iso) {
   }
 }
 
+// ถ้า Gemini ส่งเวลามาไม่มี timezone ต่อท้าย ให้เติม +07:00 (เวลาไทย) ให้อัตโนมัติ
+function ensureBangkokOffset(iso) {
+  if (!iso) return iso;
+  if (/[zZ]$/.test(iso) || /[+-]\d{2}:\d{2}$/.test(iso)) return iso; // มี timezone อยู่แล้ว ไม่ต้องแก้
+  return iso + '+07:00';
+}
+
 // รับ pool (รายการตามลำดับที่เคยแสดงผล) + รายการที่ผู้ใช้ขอ (ชื่อ หรือ เลขลำดับ) แล้วจับคู่ให้
 function resolveItems(pool, itemsRequested) {
   const matched = [];
@@ -272,6 +297,27 @@ function resolveItems(pool, itemsRequested) {
     }
   }
   return matched;
+}
+
+function buildPersonalizedPrompt(userRow, now) {
+  const toneStyle = TONE_STYLES[userRow?.tone] || '';
+  return BASE_INSTRUCTIONS
+    + (userRow?.nickname ? `\nเรียกผู้ใช้ว่า "${userRow.nickname}"` : '')
+    + (toneStyle ? `\n\n[สำคัญที่สุด] บุคลิกของคุณตอนนี้คือ "${userRow.tone}": ${toneStyle}\nต้องรักษาบุคลิกนี้ให้เข้มข้นสม่ำเสมอทุกคำตอบ ห้ามลดดีกรีลงแม้แต่ประโยคเดียว` : '')
+    + `\nเวลาปัจจุบันคือ ${now} (เขตเวลาไทย)`;
+}
+
+function getModelForUser(userRow, extraInstruction) {
+  const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+  const personalizedPrompt = buildPersonalizedPrompt(userRow, now) + (extraInstruction ? `\n\n${extraInstruction}` : '');
+  return genAI.getGenerativeModel({
+    model: 'gemini-3.1-flash-lite',
+    tools,
+    systemInstruction: personalizedPrompt,
+    generationConfig: {
+      temperature: userRow?.tone === 'พ่อมหาเผ็ดมัน' ? 1.3 : 0.9,
+    },
+  });
 }
 
 // ---------- reminders ----------
@@ -343,12 +389,13 @@ async function deleteCalendarEvents(userId, itemsRequested, refreshToken) {
 async function addTodos(userId, items) {
   const createdTasks = [];
   for (const it of items) {
+    const dueDate = ensureBangkokOffset(it.due_date);
     const { data: todoRow } = await supabase.from('todos')
-      .insert({ user_id: userId, task: it.task, due_date: it.due_date || null })
+      .insert({ user_id: userId, task: it.task, due_date: dueDate || null })
       .select().single();
 
-    if (it.due_date && todoRow) {
-      const reminderRow = await saveReminder(userId, `ครบกำหนด: ${it.task}`, it.due_date, null);
+    if (dueDate && todoRow) {
+      const reminderRow = await saveReminder(userId, `ครบกำหนด: ${it.task}`, dueDate, null);
       if (reminderRow) {
         await supabase.from('todos').update({ reminder_id: reminderRow.id }).eq('id', todoRow.id);
       }
@@ -470,7 +517,8 @@ async function executeCall(userId, call) {
 
   switch (call.name) {
     case 'set_reminder': {
-      await saveReminder(userId, args.title, args.remind_at, args.recurrence);
+      const remindAt = ensureBangkokOffset(args.remind_at);
+      await saveReminder(userId, args.title, remindAt, args.recurrence);
       const recurText = args.recurrence ? ` (เตือนซ้ำแบบ ${args.recurrence})` : '';
       return `จำให้แล้วนะ จะเตือนเรื่อง "${args.title}" ให้${recurText}`;
     }
@@ -499,8 +547,10 @@ async function executeCall(userId, call) {
       if (!userRow || !userRow.google_refresh_token) {
         return `ยังไม่ได้เชื่อมต่อ Google Calendar เลยนะ เชื่อมก่อนได้ที่ลิงก์นี้: https://pormaha-bot.onrender.com/connect-calendar?userId=${userId}`;
       }
-      const { link, eventId } = await createCalendarEvent(userRow.google_refresh_token, args.title, args.start_time, args.end_time);
-      await saveCalendarEventRecord(userId, eventId, args.title, args.start_time);
+      const startTime = ensureBangkokOffset(args.start_time);
+      const endTime = ensureBangkokOffset(args.end_time);
+      const { link, eventId } = await createCalendarEvent(userRow.google_refresh_token, args.title, startTime, endTime);
+      await saveCalendarEventRecord(userId, eventId, args.title, startTime);
       return `นัดหมายเรียบร้อยแล้วนะ: ${link}`;
     }
 
@@ -589,6 +639,31 @@ async function executeCall(userId, call) {
   }
 }
 
+// ---------- ทักทายเชิงรุก / ปริศนากวนๆ ----------
+
+// index.js เรียกฟังก์ชันนี้ตอนพบผู้ใช้ที่เงียบไปนาน คืนข้อความให้ push ออกไป
+async function generateProactiveMessage(userId) {
+  const { data: userRow } = await supabase.from('users').select('nickname, tone').eq('user_id', userId).single();
+  const riddle = pickRandomRiddle();
+
+  const model = getModelForUser(
+    userRow,
+    `งานตอนนี้: ให้ถามคำถาม/ปริศนานี้กับเพื่อนด้วยประโยคของคุณเองในบุคลิกที่กำหนด ห้ามเฉลยคำตอบ ห้ามใส่คำอธิบายอื่นนอกจากตัวคำถาม: "${riddle.question}"`
+  );
+
+  let questionText;
+  try {
+    const result = await model.generateContent(riddle.question);
+    questionText = result.response.text();
+  } catch (err) {
+    console.error('generateProactiveMessage error:', err);
+    questionText = riddle.question; // สำรอง ถ้า Gemini พังให้ส่งคำถามดิบไปเลย
+  }
+
+  pendingRiddles.set(userId, riddle);
+  return questionText;
+}
+
 // ---------- main ----------
 
 async function askLLM(userId, userMessage) {
@@ -607,24 +682,17 @@ async function askLLM(userId, userMessage) {
       // ถ้าพิมพ์อย่างอื่นมา ปล่อยให้ไหลต่อเข้าสู่การคุยปกติด้านล่าง
     }
 
-    const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-
     const { data: userRow } = await supabase.from('users').select('nickname, tone').eq('user_id', userId).single();
-    const toneStyle = TONE_STYLES[userRow?.tone] || '';
 
-    const personalizedPrompt = BASE_INSTRUCTIONS
-      + (userRow?.nickname ? `\nเรียกผู้ใช้ว่า "${userRow.nickname}"` : '')
-      + (toneStyle ? `\n\n[สำคัญที่สุด] บุคลิกของคุณตอนนี้คือ "${userRow.tone}": ${toneStyle}\nต้องรักษาบุคลิกนี้ให้เข้มข้นสม่ำเสมอทุกคำตอบ ห้ามลดดีกรีลงแม้แต่ประโยคเดียว` : '')
-      + `\nเวลาปัจจุบันคือ ${now} (เขตเวลาไทย)`;
+    // เช็คว่ากำลังตอบปริศนาที่พ่อมหาถามไปก่อนหน้าอยู่ไหม
+    let extraInstruction = '';
+    if (pendingRiddles.has(userId)) {
+      const riddle = pendingRiddles.get(userId);
+      pendingRiddles.delete(userId);
+      extraInstruction = `บริบทเพิ่มเติม: เมื่อครู่คุณเพิ่งถามปริศนา/คำถามนี้ไป: "${riddle.question}" (แนวคำตอบ: ${riddle.answer}) ข้อความถัดไปของผู้ใช้คือคำตอบของปริศนานี้ ให้ตัดสิน/ตอบรับแบบสนุกๆ ยืดหยุ่นได้ ไม่ต้องเป๊ะตามคำตอบ แล้วค่อยคุยเรื่องอื่นต่อไปตามปกติ`;
+    }
 
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3.1-flash-lite',
-      tools,
-      systemInstruction: personalizedPrompt,
-      generationConfig: {
-        temperature: userRow?.tone === 'พ่อมหาเผ็ดมัน' ? 1.3 : 0.9,
-      },
-    });
+    const model = getModelForUser(userRow, extraInstruction);
 
     if (!conversations.has(userId)) conversations.set(userId, []);
     const history = conversations.get(userId);
@@ -656,4 +724,4 @@ async function askLLM(userId, userMessage) {
   }
 }
 
-module.exports = { askLLM };
+module.exports = { askLLM, generateProactiveMessage };
